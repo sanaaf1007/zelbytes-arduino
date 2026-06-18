@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Telemetry Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans p-6">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 flex justify-between items-center border-b border-slate-700 pb-4">
+            <div>
+                <h1 class="text-3xl font-bold text-teal-400">IoT Sandbox Dashboard</h1>
+                <p class="text-slate-400 text-sm">Protocol: MQTT | Live Data Feed</p>
+            </div>
+            <div id="status-indicator" class="flex items-center space-x-2 text-sm text-green-400">
+                <span class="h-3 w-3 rounded-full bg-green-500 animate-pulse"></span>
+                <span>Connected & Syncing</span>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+                <h2 class="text-xl font-semibold text-slate-400 mb-2">Temperature</h2>
+                <div class="text-5xl font-extrabold text-orange-400">
+                    <span id="current-temp">--</span>°C
+                </div>
+            </div>
+
+            <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+                <h2 class="text-xl font-semibold text-slate-400 mb-2">Humidity</h2>
+                <div class="text-5xl font-extrabold text-blue-400">
+                    <span id="current-humidity">--</span>%
+                </div>
+            </div>
+
+            <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+                <h2 class="text-xl font-semibold text-slate-400 mb-2">Soil Moisture</h2>
+                <div class="text-5xl font-extrabold text-emerald-400">
+                    <span id="current-soil">--</span>%
+                </div>
+            </div>
+        </main>
+
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700">
+                <h3 class="text-lg font-bold text-slate-300 mb-4">Temperature Trend</h3>
+                <canvas id="tempChart" class="w-full h-64"></canvas>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700">
+                <h3 class="text-lg font-bold text-slate-300 mb-4">Humidity Trend</h3>
+                <canvas id="humidityChart" class="w-full h-64"></canvas>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700">
+                <h3 class="text-lg font-bold text-slate-300 mb-4">Soil Moisture Trend</h3>
+                <canvas id="soilChart" class="w-full h-64"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const API_KEY = 'zil_jb7bujacyth7jloaiwc79lvp3bwixqwo';
+        const LATEST_URL = 'https://careers.zelbytes.com/api/iot-lab/v1/telemetry/latest';
+        const LOGS_URL = 'https://careers.zelbytes.com/api/iot-lab/v1/telemetry';
+
+        const headers = {
+            'Authorization': `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json'
+        };
+
+        let tempChart, humidityChart, soilChart;
+
+        function initCharts() {
+            const tempCtx = document.getElementById('tempChart').getContext('2d');
+            const humidCtx = document.getElementById('humidityChart').getContext('2d');
+            const soilCtx = document.getElementById('soilChart').getContext('2d');
+
+            const chartOptions = {
+                responsive: true,
+                scales: {
+                    x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                    y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: { legend: { display: false } }
+            };
+
+            tempChart = new Chart(tempCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#fb923c', tension: 0.3, fill: false }] },
+                options: chartOptions
+            });
+
+            humidityChart = new Chart(humidCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#60a5fa', tension: 0.3, fill: false }] },
+                options: chartOptions
+            });
+
+            soilChart = new Chart(soilCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#34d399', tension: 0.3, fill: false }] },
+                options: chartOptions
+            });
+        }
+
+        // Fetch Current Snapshots
+        async function fetchLatestData() {
+            try {
+                const response = await fetch(LATEST_URL, { headers });
+                const data = await response.json();
+                
+                if(data) {
+                    // Mapped to your exact API keys: temp_c, humidity_pct, soil_moisture_pct
+                    document.getElementById('current-temp').innerText = data.temp_c ?? '--';
+                    document.getElementById('current-humidity').innerText = data.humidity_pct ?? '--';
+                    document.getElementById('current-soil').innerText = data.soil_moisture_pct ?? '--';
+                }
+            } catch (error) {
+                console.error("Error fetching latest data:", error);
+            }
+        }
+
+        // Fetch Historical Logs for Graphs
+        async function fetchLogData() {
+            try {
+                const response = await fetch(LOGS_URL, { headers });
+                let data = await response.json();
+
+                if (Array.isArray(data)) {
+                    // Pull the last 12 readings for the trend line
+                    const sortedData = data.slice(-12); 
+
+                    const timestamps = sortedData.map((log, index) => {
+                        // Use provided timestamp if it exists, otherwise fallback to index order
+                        if(log.timestamp || log.created_at) {
+                            const date = new Date(log.timestamp || log.created_at);
+                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        }
+                        return `Pt ${index + 1}`;
+                    });
+
+                    // Map arrays with the correct keys
+                    const temps = sortedData.map(log => log.temp_c);
+                    const humidities = sortedData.map(log => log.humidity_pct);
+                    const soils = sortedData.map(log => log.soil_moisture_pct);
+
+                    // Update Temp Chart
+                    tempChart.data.labels = timestamps;
+                    tempChart.data.datasets[0].data = temps;
+                    tempChart.update();
+
+                    // Update Humidity Chart
+                    humidityChart.data.labels = timestamps;
+                    humidityChart.data.datasets[0].data = humidities;
+                    humidityChart.update();
+
+                    // Update Soil Chart
+                    soilChart.data.labels = timestamps;
+                    soilChart.data.datasets[0].data = soils;
+                    soilChart.update();
+                }
+            } catch (error) {
+                console.error("Error fetching log data:", error);
+            }
+        }
+
+        // Run everything
+        initCharts();
+        fetchLatestData();
+        fetchLogData();
+
+        // Polling: Auto-refresh data every 5 seconds
+        setInterval(() => {
+            fetchLatestData();
+            fetchLogData();
+        }, 5000);
+    </script>
+</body>
+</html>
